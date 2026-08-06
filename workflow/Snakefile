@@ -2462,7 +2462,7 @@ def get_all_expected_outputs():
 
     # Final reports (always runs, adapts to what's available)
     expected_files.extend(get_report_results())
-    expected_files.extend(get_super_report())
+    expected_files.append(get_super_report())
 
     # EAR YAML template (if enabled)
     ear_yaml = _as_bool(config.get("EAR_YAML", False))

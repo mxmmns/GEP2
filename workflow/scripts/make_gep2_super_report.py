@@ -119,7 +119,7 @@ def _clean_numeric(raw: str) -> Optional[float]:
     
 def _map_metric_label(label: str) -> Optional[str]:
     """
-    Maps a metric label from the Markdown table (e.g., 'COMPL Sing. (e)' to our internal column name (e.g., 'eukaryota_single').
+    Maps a metric label from the Markdown table (e.g., 'COMPL Sing. (e)' to the internal column name (e.g., 'eukaryota_single').
     
     Uses partial string matching instead of an exact dictionary, because the label varies depending on
     the pipeline configuration (COMPL vs. BUSCO, MERQ vs. MERQ.FK, (e) vs. (x) for the second lineage). 
@@ -166,26 +166,19 @@ def parse_assembly_report(report_path: str) -> AssemblyData:
         "metrics": {}
     }
     
-    # --------------------
     header_match = re.search(r"^### (.+?) \(ID:\s*(.+?)\)\s*$", content, re.MULTILINE)
     if header_match:
         result["species"] = header_match.group(1).strip()
         taxon_id_raw = header_match.group(2).strip()
         result["taxon_id"] = None if taxon_id_raw == "not found" else taxon_id_raw
 
-    # --------------------
     family_match = re.search(r"^##### (.+)$", content, re.MULTILINE)    
     if family_match:
         result["family"] = family_match.group(1).strip()
     
-    # --------------------
     asm_id_match = re.search(r"^#### (.+)$", content, re.MULTILINE)
     if asm_id_match:
         result["asm_id"] = asm_id_match.group(1).strip()
-    
-    # --------------------
-    # Haplotype count AND its source (e.g., “ancestor” vs. “direct”) -> the source is an important indicator of reliability
-    # “ancestor”-derived values can be significantly off for groups with poor taxonomic coverage
     
     haploid_match = re.search(r"Haploid number is (\d+) \(([^,]+),", content)
     if haploid_match:
@@ -196,7 +189,6 @@ def parse_assembly_report(report_path: str) -> AssemblyData:
         if fallback_match:
             result["haploid_number"] = int(fallback_match.group(1))
     
-    # --------------------
     euka_lineage_match = re.search(r"^e = (.+?)<br>", content, re.MULTILINE)
     if euka_lineage_match:
         result["eukaryota_lineage"] = euka_lineage_match.group(1).strip()
@@ -205,7 +197,6 @@ def parse_assembly_report(report_path: str) -> AssemblyData:
     if other_lineage_match:
         result["other_lineage"] = other_lineage_match.group(1).strip()
     
-    # --------------------
     table_lines = [l for l in content.splitlines() if l.strip().startswith("|")]
     if table_lines:
         header_cells = [c.strip() for c in table_lines[0].strip().strip("|").split("|")]
@@ -220,8 +211,6 @@ def parse_assembly_report(report_path: str) -> AssemblyData:
             normalized_label = re.sub(r"\s+", " ", cells[0].strip())
             internal_key = _map_metric_label(cells[0])
  
-            # Tool detection independent of whether the label is mapped,
-            # so it's also recognized when e.g. only "COMPL Frame." occurs
             if normalized_label.startswith(("COMPL", "BUSCO")):
                 result["completeness_tool"] = "BUSCO" if normalized_label.startswith("BUSCO") else "compleasm"
             if normalized_label.startswith(("MERQ",)):
@@ -356,8 +345,7 @@ def rate_value(
 def add_ratings(super_table: SuperTable) -> SuperTable:
     """
     Adds an additional '<column>_rating' column for each metric column that can currently be rated.
-    l90_haploid_proxy is handled separately because it also requires haploid_number per row as context 
-    (now available, since haploid_number is extracted directly from the report header)
+    l90_haploid_proxy is handled separately because it also requires haploid_number per row as context.
     """
     METRIC_COLUMN_MAP: dict[str, str] = {
         "contig_n50": "contig_n50",
@@ -415,15 +403,10 @@ COLUMN_DISPLAY_NAMES: dict[str, str] = {
     "merqury_completeness": "k-mer Completeness (%)",
 }
 
-# Columns that identify/describe an assembly rather than measure it - kept
-# even if a column happens to be entirely empty for THIS set of reports,
-# unlike e.g. "other_lineage" which is dropped from the table below if no
-# report in this run used a second lineage.
+# Columns that identify/describe an assembly rather than measure it, to be kept
 PROTECTED_COLUMNS = {"species", "asm_id", "asm_file_nr"}
 
-# Text-valued columns (not numbers) - used to fix alignment by COLUMN NAME
-# instead of hardcoded position, so adding/removing/reordering columns can't
-# silently misalign a column again.
+# Text-valued columns
 TEXT_COLUMNS = ["Species", "Assembly ID", "Taxon ID", "Family", "Lineage"]
 
 COLUMN_ORDER = [
@@ -474,10 +457,6 @@ def _format_plain_numeric(value: Any, decimals: int) -> str:
     return f"{float(value):,.{decimals}f}"
 
 # Tool-neutral column labels + markers instead of tool-specific names
-# (e.g., “Gene Compl. Single (%)” instead of “BUSCO Single (%)”/“compleasm Single (%)”),
-# because different rows may have been generated using different tools.
-# The marker indicates for each row which tool was actually run.
-
 COMPLETENESS_COLUMNS = ["eukaryota_single", "eukaryota_dupl", "other_single", "other_dupl"]
 KMER_COLUMNS = ["merqury_qv", "merqury_completeness"]
  
@@ -546,7 +525,7 @@ def _prepare_display_table(
                 "Haploid number not measured directly, but estimated by GoaT from an ancestral taxon"
             )
             
-    # bp-scaled columns: fix scientific notation + optional Kb/Mb/Gb display
+    # bp-scaled columns: fix scientific notation (e.g. "1e+03") + optional Kb/Mb/Gb display
     for col in BP_SCALE_COLUMNS:
         if col in df.columns:
             df[col] = df[col].apply(lambda v: _format_bp(v, human_readable_bp))
@@ -572,9 +551,6 @@ def _prepare_display_table(
     
     df["lineage"] = df["lineage"].fillna("") if "lineage" in df.columns else ""
     
-    # Drop columns that carry zero information for THIS set of reports
-    # (e.g. "other_lineage" when no report ran a second lineage).
-    # Identifier columns are protected even if empty by chance.
     for col in list(df.columns):
         if col in PROTECTED_COLUMNS:
             continue
@@ -642,171 +618,386 @@ VALUE_DISPLAY_TO_RATING_COLUMN: dict[str, str] = {
     "k-mer Completeness (%)": "merqury_completeness_rating",
 }
 
+
 def render_html_heatmap(
     super_table: SuperTable,
     human_readable_bp: bool = False,
     source_reports: Optional[list[str]] = None,
 ) -> str:
-    """
-    Creates HTML-document with color-coded cells based on the "_rating"-columns.
+    """Render the SuperTable as a color-coded HTML heatmap.
 
-    Uses pandas.Styler instead of building HTML manually.
-
-    source_reports: optional list of the input {asm_id}_report.md paths used
-    to build this super-report, shown in the footer for traceability/reproducibility.
+    Rating columns are used to color the corresponding value columns.
+    
+    Metadata, legends, and origin information are included below the report title and table.
     """
     df, legend = _prepare_display_table(super_table, human_readable_bp)
 
-    # style-df has same form as original df, just filled with CSS background color per cell-entry and no coloring for empty cells
+
     style_df = pd.DataFrame("", index=df.index, columns=df.columns)
-    for value_col, rating_col in VALUE_DISPLAY_TO_RATING_COLUMN.items():
-        if value_col not in df.columns or rating_col not in df.columns:
+
+    for value_column, rating_column in VALUE_DISPLAY_TO_RATING_COLUMN.items():
+        if value_column not in df.columns or rating_column not in df.columns:
             continue
-        style_df[value_col] = df[rating_col].apply(
-            lambda r: f"background-color: {RATING_COLORS.get(r, '')}"
+
+        style_df[value_column] = df[rating_column].map(
+            lambda rating: (
+                f"background-color: {RATING_COLORS.get(rating, '')}"
+            )
         )
 
-    # remove rating-columns
-    rating_columns = [c for c in df.columns if c.endswith("_rating")]
-    df       = df.drop(columns=rating_columns)
+    # remove rating columns
+    rating_columns = [column for column in df.columns if column.endswith("_rating")]
+    df = df.drop(columns=rating_columns)
     style_df = style_df.drop(columns=rating_columns)
 
-    styler = df.style.apply(lambda _: style_df, axis=None).hide(axis="index")
-    text_cols_present = [c for c in TEXT_COLUMNS if c in df.columns]
-    if text_cols_present:
-        styler = styler.set_properties(subset=text_cols_present, **{"text-align": "left"})
+    # Let pandas handle the table HTML generation.
+    styler = (
+        df.style
+        .apply(lambda _: style_df, axis=None)
+        .hide(axis="index")
+    )
+
+    text_columns = [column for column in TEXT_COLUMNS if column in df.columns]
+    if text_columns:
+        styler = styler.set_properties(
+            subset=text_columns,
+            **{"text-align": "left"},
+        )
+
     table_html = styler.to_html()
 
-    # --- Report metadata (header info bar) ---
-    n_species = int(super_table["species"].nunique()) if "species" in super_table.columns else 0
-    n_assemblies = (
-        int(super_table[["species", "asm_id"]].drop_duplicates().shape[0])
-        if {"species", "asm_id"}.issubset(super_table.columns) else 0
+    # ------------------------------------------------------------------
+    # Report metadata
+    # ------------------------------------------------------------------
+    n_species = (
+        int(super_table["species"].nunique())
+        if "species" in super_table.columns
+        else 0
     )
+
+    n_assemblies = (
+        int(
+            super_table[["species", "asm_id"]]
+            .drop_duplicates()
+            .shape[0]
+        )
+        if {"species", "asm_id"}.issubset(super_table.columns)
+        else 0
+    )
+
     n_files = len(super_table)
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    meta_items = [
-        ("Generated", generated_at),
-        ("Species", str(n_species)),
-        ("Assemblies", str(n_assemblies)),
-        ("Assembly Files", str(n_files)),
-    ]
+    metadata = {
+        "Generated": generated_at,
+        "Species": str(n_species),
+        "Assemblies": str(n_assemblies),
+        "Assembly Files": str(n_files),
+    }
+
     meta_html = "".join(
-        f'<div class="meta-item"><span class="meta-label">{label}</span>'
-        f'<span class="meta-value">{value}</span></div>'
-        for label, value in meta_items
+        f"""
+        <div class="meta-item">
+            <span class="meta-label">{label}</span>
+            <span class="meta-value">{value}</span>
+        </div>
+        """
+        for label, value in metadata.items()
     )
 
-    # --- Legend boxes (both moved below the table) ---
-    rating_legend_items = "".join(
-        f'<li><span class="swatch" style="background-color:{color}"></span> {label}</li>'
-        for label, color in (
-            ("Very good (****)", RATING_COLORS["****"]),
-            ("Good (***-/ PASS)", RATING_COLORS["***-"]),
-            ("Medium (**--)", RATING_COLORS["**--"]),
-            ("Weak (*--- / FAIL)", RATING_COLORS["*---"]),
-            ("No rating available (····)", RATING_COLORS["····"]),
-        )
+    # ------------------------------------------------------------------
+    # Rating legend
+    # ------------------------------------------------------------------
+    rating_legend = (
+        ("Very good (****)", "****"),
+        ("Good (***- / PASS)", "***-"),
+        ("Medium (**--)", "**--"),
+        ("Weak (*--- / FAIL)", "*---"),
+        ("No rating available (····)", "····"),
     )
 
+    rating_legend_html = "".join(
+        f"""
+        <li>
+            <span
+                class="swatch"
+                style="background-color: {RATING_COLORS[rating]}"
+            ></span>
+            {label}
+        </li>
+        """
+        for label, rating in rating_legend
+    )
+
+    # ------------------------------------------------------------------
+    # Marker / footnote legend
+    # ------------------------------------------------------------------
     marker_legend_html = ""
+
     if legend:
         marker_legend_html = "".join(
-            f"<li><code>{marker}</code><span>{text}</span></li>"
+            f"""
+            <li>
+                <code>{marker}</code>
+                <span>{text}</span>
+            </li>
+            """
             for marker, text in sorted(legend.items())
         )
 
-    legend_boxes = f"""
+    marker_legend_box = ""
+    if marker_legend_html:
+        marker_legend_box = f"""
+        <div class="legend-box">
+            <h3>Markers &amp; Footnotes</h3>
+            <ul class="legend">
+                {marker_legend_html}
+            </ul>
+        </div>
+        """
+
+    legend_html = f"""
     <div class="legend-container">
-      <div class="legend-box">
-        <h3>Rating Colors</h3>
-        <ul class="rating-legend">{rating_legend_items}</ul>
-      </div>
-      {f'<div class="legend-box"><h3>Markers &amp; Footnotes</h3><ul class="legend">{marker_legend_html}</ul></div>' if marker_legend_html else ''}
+        <div class="legend-box">
+            <h3>Rating Colors</h3>
+            <ul class="rating-legend">
+                {rating_legend_html}
+            </ul>
+        </div>
+        {marker_legend_box}
     </div>
     """
 
-    # --- Footer (provenance / reproducibility) ---
-    footer_html = f'<footer>Generated by GEP2 Super-Report v{__version__}'
-    if source_reports:
-        names = ", ".join(os.path.basename(p) for p in source_reports)
-        footer_html += f" &middot; Aggregated from {len(source_reports)} report file(s): {names}"
-    footer_html += "</footer>"
+    # ------------------------------------------------------------------
+    # Origin footer
+    # ------------------------------------------------------------------
+    footer = f"<footer>Generated by GEP2 Super-Report v{__version__}"
 
+    if source_reports:
+        report_names = ", ".join(
+            os.path.basename(path) for path in source_reports
+        )
+        footer += (
+            f" &middot; Aggregated from {len(source_reports)} "
+            f"report file(s): {report_names}"
+        )
+
+    footer += "</footer>"
+
+    # ------------------------------------------------------------------
+    # Final HTML document
+    # ------------------------------------------------------------------
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>GEP2 Super-Report</title>
 <style>
-:root {{ --accent: #2c3e50; }}
+:root {{
+    --accent: #2c3e50;
+}}
+
 body {{
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  margin: 2em auto;
-  max-width: 1500px;
-  padding: 0 1.5em;
-  color: #222;
-  line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 Helvetica, Arial, sans-serif;
+    margin: 2em auto;
+    max-width: 1500px;
+    padding: 0 1.5em;
+    color: #222;
+    line-height: 1.45;
 }}
+
 h1 {{
-  margin-bottom: 0.15em;
-  font-size: 1.9em;
-  border-bottom: 3px solid var(--accent);
-  padding-bottom: 0.35em;
+    margin-bottom: 0.15em;
+    font-size: 1.9em;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: 0.35em;
 }}
-.subtitle {{ color: #666; margin-top: 0.2em; margin-bottom: 1.3em; font-size: 0.95em; }}
+
+.subtitle {{
+    color: #666;
+    margin-top: 0.2em;
+    margin-bottom: 1.3em;
+    font-size: 0.95em;
+}}
+
 .report-meta {{
-  display: flex; flex-wrap: wrap;
-  background: #f4f6f8; border: 1px solid #e0e0e0; border-radius: 6px;
-  padding: 0.7em 0; margin-bottom: 1.6em;
+    display: flex;
+    flex-wrap: wrap;
+    background: #f4f6f8;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.7em 0;
+    margin-bottom: 1.6em;
 }}
-.meta-item {{ padding: 0 1.6em; border-right: 1px solid #d8d8d8; }}
-.meta-item:last-child {{ border-right: none; }}
-.meta-item:first-child {{ padding-left: 1.6em; }}
-.meta-label {{ display: block; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.05em; color: #888; }}
-.meta-value {{ display: block; font-size: 1.15em; font-weight: 600; color: var(--accent); }}
-.table-wrap {{ overflow-x: auto; border: 1px solid #ddd; border-radius: 6px; }}
-table {{ border-collapse: collapse; width: 100%; font-size: 0.9em; }}
-th, td {{ border: 1px solid #e6e6e6; padding: 7px 11px; text-align: right; white-space: nowrap; }}
-th {{ background-color: var(--accent); color: white; position: sticky; top: 0; font-weight: 600; }}
-tbody tr:nth-child(even) td {{ background-color: #f7f8fa; }}
-tr:hover td {{ filter: brightness(0.95); }}
-.legend-container {{ display: flex; gap: 1.4em; flex-wrap: wrap; margin-top: 1.8em; }}
+
+.meta-item {{
+    padding: 0 1.6em;
+    border-right: 1px solid #d8d8d8;
+}}
+
+.meta-item:last-child {{
+    border-right: none;
+}}
+
+.meta-label {{
+    display: block;
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888;
+}}
+
+.meta-value {{
+    display: block;
+    font-size: 1.15em;
+    font-weight: 600;
+    color: var(--accent);
+}}
+
+.table-wrap {{
+    overflow-x: auto;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}}
+
+table {{
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9em;
+}}
+
+th,
+td {{
+    border: 1px solid #e6e6e6;
+    padding: 7px 11px;
+    text-align: right;
+    white-space: nowrap;
+}}
+
+th {{
+    background-color: var(--accent);
+    color: white;
+    position: sticky;
+    top: 0;
+    font-weight: 600;
+}}
+
+tbody tr:nth-child(even) td {{
+    background-color: #f7f8fa;
+}}
+
+tr:hover td {{
+    filter: brightness(0.95);
+}}
+
+.legend-container {{
+    display: flex;
+    gap: 1.4em;
+    flex-wrap: wrap;
+    margin-top: 1.8em;
+}}
+
 .legend-box {{
-  background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px;
-  padding: 1em 1.4em; flex: 1; min-width: 280px;
+    background: #fafafa;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 1em 1.4em;
+    flex: 1;
+    min-width: 280px;
 }}
+
 .legend-box h3 {{
-  margin: 0 0 0.7em 0; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.05em;
-  color: #555; border-bottom: 1px solid #ddd; padding-bottom: 0.45em;
+    margin: 0 0 0.7em 0;
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #555;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.45em;
 }}
-ul.rating-legend, ul.legend {{ list-style: none; padding-left: 0; margin: 0; }}
-ul.rating-legend li, ul.legend li {{ display: flex; align-items: center; margin-bottom: 0.55em; font-size: 0.88em; }}
+
+ul.rating-legend,
+ul.legend {{
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+}}
+
+ul.rating-legend li,
+ul.legend li {{
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.55em;
+    font-size: 0.88em;
+}}
+
 ul.legend code {{
-  background: #eaeaea; padding: 4px 9px; border-radius: 4px; font-size: 1.05em;
-  margin-right: 0.8em; min-width: 1.3em; text-align: center; display: inline-block;
+    background: #eaeaea;
+    padding: 4px 9px;
+    border-radius: 4px;
+    font-size: 1.05em;
+    margin-right: 0.8em;
+    min-width: 1.3em;
+    text-align: center;
+    display: inline-block;
 }}
-.swatch {{ display: inline-block; width: 14px; height: 14px; border: 1px solid #999; border-radius: 2px; margin-right: 0.7em; flex-shrink: 0; }}
-footer {{ margin-top: 2.2em; padding-top: 1em; border-top: 1px solid #e6e6e6; font-size: 0.78em; color: #999; }}
+
+.swatch {{
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1px solid #999;
+    border-radius: 2px;
+    margin-right: 0.7em;
+    flex-shrink: 0;
+}}
+
+footer {{
+    margin-top: 2.2em;
+    padding-top: 1em;
+    border-top: 1px solid #e6e6e6;
+    font-size: 0.78em;
+    color: #999;
+}}
+
 @media print {{
-  th {{ background-color: #eee !important; color: #000 !important; position: static; }}
-  .table-wrap {{ overflow-x: visible; }}
+    th {{
+        background-color: #eee !important;
+        color: #000 !important;
+        position: static;
+    }}
+
+    .table-wrap {{
+        overflow-x: visible;
+    }}
 }}
 </style>
 </head>
+
 <body>
 <h1>GEP2 Super-Report</h1>
-<p class="subtitle">Aggregated genome assembly quality overview across multiple GEP2 pipeline reports</p>
-<div class="report-meta">{meta_html}</div>
-<div class="table-wrap">
-{table_html}
+
+<p class="subtitle">
+    Aggregated genome assembly quality overview across multiple
+    GEP2 reports
+</p>
+
+<div class="report-meta">
+    {meta_html}
 </div>
-{legend_boxes}
-{footer_html}
+
+<div class="table-wrap">
+    {table_html}
+</div>
+
+{legend_html}
+
+{footer}
 </body>
 </html>
 """
+
 
 # -------------------------------------------------------------------------------
 # CLI ENTRY POINT

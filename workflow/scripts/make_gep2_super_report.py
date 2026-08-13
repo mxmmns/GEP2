@@ -268,16 +268,16 @@ COLUMN_DISPLAY_NAMES: dict[str, str] = {
     "haploid_number": "Haploid Number",
     "asm_file_nr": "Assembly File #",
     "total_bp": "Total bp",
-    "contig_n50": "Contig N50",
-    "scaffold_n50": "Scaffold N50",
     "gaps_per_gbp": "Gaps/Gbp",
+    "scaffold_n50": "Scaffold N50",
     "scaffold_l90": "Scaffold L90",
-    "structural_errors": "Structural Errors",
+    "contig_n50": "Contig N50",
     "lineage": "Lineage",
     "gene_compl_single": "Gene Compl. Single (%)",
     "gene_compl_dupl": "Gene Compl. Dupl. (%)",
     "merqury_qv": "k-mer QV",
     "merqury_completeness": "k-mer Completeness (%)",
+    "structural_errors": "Structural Errors",
 }
 
 # Columns that identify/describe an assembly rather than measure it, to be kept
@@ -288,10 +288,10 @@ TEXT_COLUMNS = ["Species", "Assembly ID", "Taxon ID", "Family", "Lineage"]
 
 COLUMN_ORDER = [
     "species", "asm_id", "taxon_id", "family", "haploid_number", "asm_file_nr",
-    "total_bp", "contig_n50", "scaffold_n50", "gaps_per_gbp", "scaffold_l90",
-    "structural_errors",
+    "total_bp", "gaps_per_gbp", "scaffold_n50",  "scaffold_l90", "contig_n50", 
     "lineage", "gene_compl_single", "gene_compl_dupl",
     "merqury_qv", "merqury_completeness",
+    "structural_errors"
 ]
 
 BP_SCALE_COLUMNS = ["total_bp", "contig_n50", "scaffold_n50"]
@@ -400,9 +400,11 @@ def _prepare_display_table(
         )
         df["haploid_number"] = df.apply(_format_haploid_number, axis=1)
         if has_non_direct:
-            legend["\u26A0"] = (
-                "Haploid number not measured directly, but estimated by GoaT from an ancestral taxon"
-            )
+            legend["\u26A0"] = {
+                "text_before": "Haploid number is an estimation by",
+                "link_text": "GoaT",
+                "link": "https://goat.genomehubs.org"
+            }
             
     # bp-scaled columns: fix scientific notation (e.g. "1e+03") + optional Kb/Mb/Gb display
     for col in BP_SCALE_COLUMNS:
@@ -471,6 +473,8 @@ def render_markdown_table(
     
     if legend:
         for marker, text in sorted(legend.items()):
+            if isinstance(text, dict):
+                text = f"{text['text_before']} [{text['link_text']}]({text['link']})"
             lines.append(f"'{marker}'   {text}  ")
         lines.append("")
         
@@ -478,11 +482,11 @@ def render_markdown_table(
 
 
 RATING_COLORS: dict[str, str] = {
-    "****": "#0072b2",  # very very good
-    "***-": "#009e73",  # very good (passes Standards)
-    "**--": "#f0e442",  # medium
-    "*---": "#f8696b",  # not good
-    "····": "#f0f0f0",  # no rating -> neutral
+    "****": "#0072b2bf",  # Way above threshold
+    "***-": "#009e73bf",  # At or above threshold
+    "**--": "#e69f00bf",  # Below threshold
+    "*---": "#cc79a7bf",  # Way below threshold
+    "····": "#f0f0f0bf",  # no rating -> neutral
 }
 
 VALUE_DISPLAY_TO_RATING_COLUMN: dict[str, str] = {
@@ -587,11 +591,11 @@ def render_html_heatmap(
     # Rating legend
     # ------------------------------------------------------------------
     rating_legend = (
-        ("Very good (****)", "****"),
-        ("Good (***-)", "***-"),
-        ("Medium (**--)", "**--"),
-        ("Weak (*---)", "*---"),
-        ("No rating available (····)", "····"),
+        ("****", " Exceeds threshold"),
+        ("***-", " Meets threshold"),
+        ("**--", " Below threshold"),
+        ("*---", " Far below threshold"),
+        ("····", " No rating available"),
     )
 
     rating_legend_html = "".join(
@@ -601,10 +605,10 @@ def render_html_heatmap(
                 class="swatch"
                 style="background-color: {RATING_COLORS[rating]}"
             ></span>
-            {label}
+            {label} <code> ({rating}) </code>
         </li>
         """
-        for label, rating in rating_legend
+        for rating, label in rating_legend
     )
 
     # ------------------------------------------------------------------
@@ -623,6 +627,25 @@ def render_html_heatmap(
             for marker, text in sorted(legend.items())
         )
 
+    # Process legend entries, converting dicts to HTML links
+    processed_legend = {}
+    for marker, text in legend.items():
+        if isinstance(text, dict):
+            text = f'{text["text_before"]} <a href="{text["link"]}" target="_blank">{text["link_text"]}</a>'
+        processed_legend[marker] = text
+    
+    marker_legend_html = ""
+    if processed_legend:
+        marker_legend_html = "".join(
+            f"""
+            <li>
+                <code>{marker}</code>
+                <span>{text}</span>
+            </li>
+            """
+            for marker, text in sorted(processed_legend.items())
+        )
+    
     marker_legend_box = ""
     if marker_legend_html:
         marker_legend_box = f"""
@@ -638,6 +661,9 @@ def render_html_heatmap(
     <div class="legend-container">
         <div class="legend-box">
             <h3>Rating Colors</h3>
+            <p style="font-size: 0.85em; color: #666; margin-bottom: 0.8em;">
+                Thresholds are related to <a href="https://www.earthbiogenome.org/report-on-assembly-standards" target="_blank">EBP Assembly Standards</a>.
+            </p>
             <ul class="rating-legend">
                 {rating_legend_html}
             </ul>
@@ -820,6 +846,12 @@ ul.legend code {{
     min-width: 1.3em;
     text-align: center;
     display: inline-block;
+}}
+
+ul.rating-legend code {{
+    font-weight: bold;
+    font-size: 1.15em;
+    letter-spacing: 0.05em;
 }}
 
 .swatch {{

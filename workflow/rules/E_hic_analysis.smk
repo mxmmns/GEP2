@@ -101,10 +101,7 @@ def _get_hic_reads_for_assembly(species, asm_id):
                 # Extract base names and construct processed paths
                 seen_bases = set()
                 for p in paths:
-                    basename = os.path.basename(p)
-                    base = re.sub(r'^(hic)_Path\d+_', '', basename, flags=re.IGNORECASE)
-                    base = base.replace(".fq.gz", "").replace(".fastq.gz", "")
-                    base = base.replace("_1", "").replace("_2", "")
+                    base = read_base_from_path(p, True)   # hic is always paired
                     
                     if base in seen_bases:
                         continue
@@ -267,7 +264,7 @@ def _get_long_reads_for_coverage(wildcards):
         read_type_dict = asm_data.get("read_type", {})
         
         # Master switch for read processing
-        reads_proc_enabled = _as_bool(config.get("READS_PROC", False))
+        reads_proc_enabled = _as_bool(config.get("READS_PROC", True))
         
         # Prefer HiFi, fall back to ONT
         for preferred_type in ["hifi", "ont"]:
@@ -284,7 +281,7 @@ def _get_long_reads_for_coverage(wildcards):
                 
                 # Determine if we should use processed or raw reads
                 if rt_normalized == "hifi":
-                    use_processed = reads_proc_enabled and _as_bool(config.get("FILTER_HIFI", False))
+                    use_processed = reads_proc_enabled and _as_bool(config.get("FILTER_HIFI", True))
                     proc_suffix = "_filtered.fq.gz"
                 elif rt_normalized == "ont":
                     use_processed = reads_proc_enabled and _as_bool(config.get("CORRECT_ONT", False))

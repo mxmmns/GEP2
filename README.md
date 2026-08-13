@@ -99,6 +99,8 @@ Load the conda environment like `conda activate GEP2_env` and in the GEP2 folder
 ```bash
 nohup snakemake --profile execution/slurm &
 ```
+> A convenient way to check which particular rules are running on the jobs is:<br>
+> `squeue --me -o "%.18i %.9P %.8j %.8T %.10M %.9l %.6D %R %k"` (or use -u $USER instead of --me).
 
 #### On Local Computer:
 
@@ -129,18 +131,19 @@ snakemake --profile execution/local --rerun-incomplete -n
 ```
 
 - If Snakemake was suddenly killed, it might leave a hidden lock on your working directory to prevent other processes from overwriting files, and will tell you the directory is locked. You need to unlock it first before proceed with the run command: `snakemake --unlock`
+- If correct output files were already created by a previously killed job, but Snakemake isn't recognising them, you can tell the pipeline to accept them without re-running by updating their timestamps using `snakemake --touch`. **Use this with caution:** double-check that those files are complete and not corrupted or empty, otherwise invalid data will propagate downstream!
 - Some HPC systems do not allow users to keep processes running on the login node, even if those processes consume virtually no resources. This is the case for our Snakemake workflow in Slurm mode, which only submits jobs to the queue. In such cases, the pipeline can be executed from a Slurm job script, for example:
 
 ```bash
 #!/bin/bash
 
-#SBATCH -J game_controller
+#SBATCH -J gep2_controller
 ### Add your Slurm parameters here (partition, std out, etc.)
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=5-00:00:00
 
-conda activate GAME_env # or the way you use to load the conda env in a job script
+conda activate GEP2_env # or the way you use to load the conda env in a job script
 
 # Prevent common issues with Slurm environment variables and Snakemake
 for var in $(env | grep -i "^SLURM_" | cut -d= -f1); do
@@ -243,7 +246,7 @@ GEP2_results/
 | tool                                                              | doi                            | version | container                                                    |
 |:----------------------------------------------------------------- |:------------------------------ |:------- |:------------------------------------------------------------ |
 | [bedtools](https://github.com/arq5x/bedtools2)                    | 10.1093/bioinformatics/btq033  | 2.31.1  | docker://diegomics/hic_analysis:0.2                          |
-| [blobtools](https://github.com/genomehubs/blobtoolkit)            | -                              | 4.5.1   | docker://genomehubs/blobtoolkit:4.5.1                        |
+| [blobtools](https://github.com/genomehubs/blobtoolkit)            | -                              | 4.5.5   | docker://genomehubs/blobtoolkit:4.5.5                        |
 | [bbmap](https://sourceforge.net/projects/bbmap)                   | 10.1371/journal.pone.0185056   | 39.81   | docker://diegomics/gep2_base:0.4                             |
 | [busco](https://gitlab.com/ezlab/busco)                           | 10.1093/molbev/msab199         | 6.1.0   | docker://ezlabgva/busco:v6.1.0_cv1                           |
 | [bwa-mem2](https://github.com/bwa-mem2/bwa-mem2)                  | 10.1109/IPDPS.2019.00041       | 2.3     | docker://diegomics/hic_analysis:0.2                          |
